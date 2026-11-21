@@ -8,6 +8,7 @@ set(ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 add_library(firmware_host STATIC
     ${ROOT}/main/common/crc16.c
     ${ROOT}/main/machine/machine_settings.c
+    ${ROOT}/main/machine/machine_core.c
     ${ROOT}/main/settings/settings_codec.c
 )
 target_include_directories(firmware_host PUBLIC ${ROOT}/main)
@@ -20,3 +21,4 @@ endfunction()
 
 add_host_test(test_crc16)
 add_host_test(test_settings)
+add_host_test(test_machine_core)
