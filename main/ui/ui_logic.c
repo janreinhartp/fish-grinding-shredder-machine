@@ -101,9 +101,18 @@ static void edit_selected(ui_model_t *ui, int steps) {
     }
 }
 
-static void on_short_press(ui_model_t *ui, operator_event_t *command) {
+static void clear_manual_flags(ui_model_t *ui) {
+    ui->manual_shredder = false;
+    ui->manual_grinder = false;
+    ui->manual_door = false;
+}
+
+static void on_short_press(ui_model_t *ui, machine_state_t state, operator_event_t *command) {
     switch (ui->screen) {
     case UI_SCREEN_MENU:
+        if ((ui->row == MENU_SETTINGS || ui->row == MENU_MANUAL) && state != MACHINE_IDLE) {
+            break; /* the menu was opened from a stale snapshot; stay put */
+        }
         if (ui->row == MENU_SETTINGS) {
             ui->settings = ui->saved;
             go(ui, UI_SCREEN_SETTINGS, 0);
@@ -131,6 +140,11 @@ static void on_short_press(ui_model_t *ui, operator_event_t *command) {
         }
         break;
     case UI_SCREEN_MANUAL:
+        if (state != MACHINE_MANUAL) {
+            clear_manual_flags(ui);
+            go(ui, UI_SCREEN_MAIN, 0);
+            break;
+        }
         if (ui->row == MANUAL_SHREDDER) {
             ui->manual_shredder = !ui->manual_shredder;
             command->type = CMD_SET_SHREDDER;
@@ -215,7 +229,7 @@ void ui_on_encoder(ui_model_t *ui, const ui_view_t *view, const enc_event_t *eve
         }
         break;
     case ENC_SHORT:
-        on_short_press(ui, command);
+        on_short_press(ui, view->state, command);
         break;
     case ENC_LONG:
         on_long_press(ui, view->state);

@@ -33,16 +33,18 @@ void control_task(void *arg) {
     for (;;) {
         vTaskDelayUntil(&wake, period > 0 ? period : 1);
 
-        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-
         settings = status_bus_get_settings();
         machine_core_set_settings(&s_core, &settings);
 
         scale_snapshot_t scale = status_bus_get_scale();
-        uint32_t age_ms = now_ms - scale.sample_ms;
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        int32_t age_ms = (int32_t)(now_ms - scale.sample_ms);
+        if (age_ms < 0) {
+            age_ms = 0; /* sample timestamp is slightly ahead of this clock read */
+        }
         scale_sample_t sample = {
             .grams = scale.grams,
-            .valid = scale.last_ok && scale.grams >= 0 && age_ms <= profile->timing.stale_ms,
+            .valid = scale.last_ok && scale.grams >= 0 && (uint32_t)age_ms <= profile->timing.stale_ms,
         };
 
         operator_event_t command = {.type = CMD_NONE, .level = false};

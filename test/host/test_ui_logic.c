@@ -225,6 +225,48 @@ static void test_fault_ack_resets_manual_screen(void) {
     EXPECT_EQ_INT(ui.manual_door, 0);
 }
 
+static void test_menu_settings_rejected_after_batch_started(void) {
+    ui_model_t ui;
+    new_ui(&ui);
+    send(&ui, MACHINE_IDLE, LONG_PRESS); /* menu opened from a snapshot that is now stale */
+    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MENU);
+    operator_event_t cmd = send(&ui, MACHINE_START_GRINDER, SHORT_PRESS); /* row 0: Settings */
+    EXPECT_EQ_INT(cmd.type, CMD_NONE);
+    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MENU);
+    EXPECT_EQ_INT(ui.row, 0);
+}
+
+static void test_menu_manual_rejected_after_batch_started(void) {
+    ui_model_t ui;
+    new_ui(&ui);
+    send(&ui, MACHINE_IDLE, LONG_PRESS);
+    send(&ui, MACHINE_IDLE, rotate(1)); /* Manual */
+    operator_event_t cmd = send(&ui, MACHINE_WEIGHT_VALIDATION, SHORT_PRESS);
+    EXPECT_EQ_INT(cmd.type, CMD_NONE);
+    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MENU);
+    EXPECT_EQ_INT(ui.row, 1);
+}
+
+static void test_manual_screen_returns_to_main_when_not_in_manual(void) {
+    ui_model_t ui;
+    new_ui(&ui);
+    send(&ui, MACHINE_IDLE, LONG_PRESS);
+    send(&ui, MACHINE_IDLE, rotate(1));
+    send(&ui, MACHINE_IDLE, SHORT_PRESS);
+    send(&ui, MACHINE_IDLE, SHORT_PRESS); /* Enable */
+    operator_event_t cmd = send(&ui, MACHINE_MANUAL, SHORT_PRESS); /* Shredder on */
+    EXPECT_EQ_INT(cmd.type, CMD_SET_SHREDDER);
+    EXPECT_EQ_INT(ui.manual_shredder, 1);
+
+    /* The machine is no longer in manual: no SET command may be sent. */
+    cmd = send(&ui, MACHINE_IDLE, SHORT_PRESS);
+    EXPECT_EQ_INT(cmd.type, CMD_NONE);
+    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MAIN);
+    EXPECT_EQ_INT(ui.manual_shredder, 0);
+    EXPECT_EQ_INT(ui.manual_grinder, 0);
+    EXPECT_EQ_INT(ui.manual_door, 0);
+}
+
 static void test_other_screens_ignore_long_press(void) {
     ui_model_t ui;
     new_ui(&ui);
@@ -360,6 +402,9 @@ int main(void) {
     test_manual_mode();
     test_fault();
     test_fault_ack_resets_manual_screen();
+    test_menu_settings_rejected_after_batch_started();
+    test_menu_manual_rejected_after_batch_started();
+    test_manual_screen_returns_to_main_when_not_in_manual();
     test_other_screens_ignore_long_press();
     test_diagnostics();
     test_menu_wraps();

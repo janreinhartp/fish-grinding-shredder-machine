@@ -342,13 +342,13 @@ static void render_manual_confirm(const ui_model_t *ui) {
     }
 }
 
-static void render_manual(const ui_model_t *ui) {
+static void render_manual(const ui_model_t *ui, const machine_status_t *machine) {
     char text[TEXT_LEN];
-    snprintf(text, sizeof(text), "Shredder %s", on_off(ui->manual_shredder));
+    snprintf(text, sizeof(text), "Shredder %s", on_off(machine->outputs.shredder));
     render_row(&s_manual, 0, ui->row == 0, text);
-    snprintf(text, sizeof(text), "Grinder %s", on_off(ui->manual_grinder));
+    snprintf(text, sizeof(text), "Grinder %s", on_off(machine->outputs.grinder));
     render_row(&s_manual, 1, ui->row == 1, text);
-    snprintf(text, sizeof(text), "Door command %s", ui->manual_door ? "Open" : "Close");
+    snprintf(text, sizeof(text), "Door command %s", machine->outputs.door_open ? "Open" : "Close");
     render_row(&s_manual, 2, ui->row == 2, text);
     render_row(&s_manual, 3, ui->row == 3, "Back");
 }
@@ -431,7 +431,7 @@ static void render(const ui_model_t *ui, uint32_t now) {
         show_only(s_manual_confirm.cont);
         break;
     case UI_SCREEN_MANUAL:
-        render_manual(ui);
+        render_manual(ui, &machine);
         show_only(s_manual.cont);
         break;
     case UI_SCREEN_DIAGNOSTICS:
