@@ -13,6 +13,7 @@ add_library(firmware_host STATIC
     ${ROOT}/main/modbus/modbus_master.c
     ${ROOT}/main/device/scale_decode.c
     ${ROOT}/main/device/profile.c
+    ${ROOT}/main/ui/encoder_decode.c
 )
 target_include_directories(firmware_host PUBLIC ${ROOT}/main)
 
@@ -27,3 +28,4 @@ add_host_test(test_settings)
 add_host_test(test_machine_core)
 add_host_test(test_modbus_master)
 add_host_test(test_scale_decode)
+add_host_test(test_encoder_decode)
