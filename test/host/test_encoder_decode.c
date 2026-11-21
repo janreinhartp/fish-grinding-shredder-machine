@@ -106,10 +106,11 @@ static void test_short_press(void) {
     encoder_decode_init(&dec);
     EXPECT_EQ_INT(feed(&dec, 0, 0x0, 1, ev), 0);
     EXPECT_EQ_INT(feed(&dec, 1000, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 1050, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 1100, 0x0, 1, ev), 1);
+    EXPECT_EQ_INT(feed(&dec, 1020, 0x0, 0, ev), 0); /* level stable: press accepted */
+    EXPECT_EQ_INT(feed(&dec, 1100, 0x0, 1, ev), 0);
+    EXPECT_EQ_INT(feed(&dec, 1119, 0x0, 1, ev), 0);
+    EXPECT_EQ_INT(feed(&dec, 1120, 0x0, 1, ev), 1);
     EXPECT_EQ_INT(ev[0].type, ENC_SHORT);
-    EXPECT_EQ_INT(feed(&dec, 1200, 0x0, 1, ev), 0);
 }
 
 static void test_long_press_fires_once_and_release_is_silent(void) {
@@ -118,12 +119,12 @@ static void test_long_press_fires_once_and_release_is_silent(void) {
     encoder_decode_init(&dec);
     EXPECT_EQ_INT(feed(&dec, 0, 0x0, 1, ev), 0);
     EXPECT_EQ_INT(feed(&dec, 100, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 899, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 900, 0x0, 0, ev), 1);
+    EXPECT_EQ_INT(feed(&dec, 120, 0x0, 0, ev), 0); /* press accepted */
+    EXPECT_EQ_INT(feed(&dec, 919, 0x0, 0, ev), 0);
+    EXPECT_EQ_INT(feed(&dec, 920, 0x0, 0, ev), 1);
     EXPECT_EQ_INT(ev[0].type, ENC_LONG);
-    EXPECT_EQ_INT(feed(&dec, 1500, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 2000, 0x0, 1, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 2100, 0x0, 1, ev), 0);
+    EXPECT_EQ_INT(feed(&dec, 1500, 0x0, 1, ev), 0);
+    EXPECT_EQ_INT(feed(&dec, 1520, 0x0, 1, ev), 0);
 }
 
 static void test_release_at_long_threshold_emits_long_not_short(void) {
@@ -132,21 +133,35 @@ static void test_release_at_long_threshold_emits_long_not_short(void) {
     encoder_decode_init(&dec);
     EXPECT_EQ_INT(feed(&dec, 0, 0x0, 1, ev), 0);
     EXPECT_EQ_INT(feed(&dec, 100, 0x0, 0, ev), 0);
-    /* No sample between press and a late release: the hold still counts. */
-    EXPECT_EQ_INT(feed(&dec, 1000, 0x0, 1, ev), 1);
+    EXPECT_EQ_INT(feed(&dec, 120, 0x0, 0, ev), 0); /* press accepted */
+    /* Release sampled as the hold reaches 800 ms: long, not short. */
+    EXPECT_EQ_INT(feed(&dec, 920, 0x0, 1, ev), 1);
     EXPECT_EQ_INT(ev[0].type, ENC_LONG);
+    EXPECT_EQ_INT(feed(&dec, 940, 0x0, 1, ev), 0);
 }
 
-static void test_release_10ms_after_press_waits_for_20ms(void) {
+static void test_10ms_pulse_emits_nothing(void) {
     encoder_decode_t dec;
     enc_event_t ev[MAX_EVENTS];
+    int total = 0;
     encoder_decode_init(&dec);
-    EXPECT_EQ_INT(feed(&dec, 0, 0x0, 1, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 100, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 110, 0x0, 1, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 119, 0x0, 1, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 120, 0x0, 1, ev), 1);
-    EXPECT_EQ_INT(ev[0].type, ENC_SHORT);
+    total += feed(&dec, 0, 0x0, 1, ev);
+    total += feed(&dec, 100, 0x0, 0, ev);
+    total += feed(&dec, 110, 0x0, 1, ev);
+    total += feed(&dec, 200, 0x0, 1, ev);
+    EXPECT_EQ_INT(total, 0);
+}
+
+static void test_1ms_spike_emits_nothing(void) {
+    encoder_decode_t dec;
+    enc_event_t ev[MAX_EVENTS];
+    int total = 0;
+    encoder_decode_init(&dec);
+    total += feed(&dec, 0, 0x0, 1, ev);
+    total += feed(&dec, 100, 0x0, 0, ev);
+    total += feed(&dec, 101, 0x0, 1, ev);
+    total += feed(&dec, 200, 0x0, 1, ev);
+    EXPECT_EQ_INT(total, 0);
 }
 
 static void test_press_bounce_under_20ms_is_ignored(void) {
@@ -156,10 +171,12 @@ static void test_press_bounce_under_20ms_is_ignored(void) {
     encoder_decode_init(&dec);
     total += feed(&dec, 0, 0x0, 1, ev);
     total += feed(&dec, 100, 0x0, 0, ev);
-    total += feed(&dec, 105, 0x0, 1, ev);  /* bounce up */
-    total += feed(&dec, 108, 0x0, 0, ev);  /* back down, still pressed */
+    total += feed(&dec, 105, 0x0, 1, ev); /* bounce up before 20 ms */
+    total += feed(&dec, 108, 0x0, 0, ev); /* down again */
+    total += feed(&dec, 128, 0x0, 0, ev); /* this press is accepted */
     EXPECT_EQ_INT(total, 0);
-    EXPECT_EQ_INT(feed(&dec, 160, 0x0, 1, ev), 1);
+    EXPECT_EQ_INT(feed(&dec, 200, 0x0, 1, ev), 0);
+    EXPECT_EQ_INT(feed(&dec, 220, 0x0, 1, ev), 1);
     EXPECT_EQ_INT(ev[0].type, ENC_SHORT);
 }
 
@@ -172,20 +189,20 @@ static void test_two_events_from_one_sample_arrive_on_successive_calls(void) {
     encoder_decode_init(&dec);
     EXPECT_EQ_INT(feed(&dec, 0, 0x0, 1, ev), 0);
     EXPECT_EQ_INT(feed(&dec, 10, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 20, 0x0, 0, ev), 0);
+    EXPECT_EQ_INT(feed(&dec, 30, 0x0, 0, ev), 0); /* press accepted */
     EXPECT_EQ_INT(feed(&dec, 100, seq[0], 0, ev), 0);
     EXPECT_EQ_INT(feed(&dec, 105, seq[1], 0, ev), 0);
     EXPECT_EQ_INT(feed(&dec, 110, seq[2], 0, ev), 0);
     /* This sample both completes the detent and crosses the 800 ms hold. */
-    EXPECT(encoder_decode_step(&dec, 910, 0, 0, 0, &e));
+    EXPECT(encoder_decode_step(&dec, 830, 0, 0, 0, &e));
     if (e.type == ENC_ROTATE) { rotates++; EXPECT_EQ_INT(e.steps, 1); }
     if (e.type == ENC_LONG) { longs++; }
-    EXPECT(encoder_decode_step(&dec, 910, 0, 0, 0, &e));
+    EXPECT(encoder_decode_step(&dec, 830, 0, 0, 0, &e));
     if (e.type == ENC_ROTATE) { rotates++; EXPECT_EQ_INT(e.steps, 1); }
     if (e.type == ENC_LONG) { longs++; }
     EXPECT_EQ_INT(rotates, 1);
     EXPECT_EQ_INT(longs, 1);
-    EXPECT(!encoder_decode_step(&dec, 910, 0, 0, 0, &e));
+    EXPECT(!encoder_decode_step(&dec, 830, 0, 0, 0, &e));
 }
 
 static void test_timestamp_wraparound(void) {
@@ -194,7 +211,8 @@ static void test_timestamp_wraparound(void) {
     encoder_decode_init(&dec);
     EXPECT_EQ_INT(feed(&dec, 0xFFFFFF00u, 0x0, 1, ev), 0);
     EXPECT_EQ_INT(feed(&dec, 0xFFFFFF10u, 0x0, 0, ev), 0);
-    EXPECT_EQ_INT(feed(&dec, 0xFFFFFF10u + 800u, 0x0, 0, ev), 1);
+    EXPECT_EQ_INT(feed(&dec, 0xFFFFFF10u + 20u, 0x0, 0, ev), 0); /* press accepted across the clock */
+    EXPECT_EQ_INT(feed(&dec, 0xFFFFFF10u + 20u + 800u, 0x0, 0, ev), 1);
     EXPECT_EQ_INT(ev[0].type, ENC_LONG);
 }
 
@@ -208,7 +226,8 @@ int main(void) {
     test_short_press();
     test_long_press_fires_once_and_release_is_silent();
     test_release_at_long_threshold_emits_long_not_short();
-    test_release_10ms_after_press_waits_for_20ms();
+    test_10ms_pulse_emits_nothing();
+    test_1ms_spike_emits_nothing();
     test_press_bounce_under_20ms_is_ignored();
     test_two_events_from_one_sample_arrive_on_successive_calls();
     test_timestamp_wraparound();

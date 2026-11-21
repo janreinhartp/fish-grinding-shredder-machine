@@ -34,17 +34,16 @@ bool encoder_decode_step(encoder_decode_t *dec, uint32_t now_ms, uint8_t a, uint
         dec->ab = ab;
         dec->sw_down = down;
         dec->last_quad_ms = now_ms - QUAD_DEBOUNCE_MS;
-        dec->last_sw_ms = now_ms - SWITCH_DEBOUNCE_MS;
     } else {
-        /* A hold that reached the threshold fires before any release is read. */
-        if (dec->press_armed && !dec->long_fired && (uint32_t)(now_ms - dec->press_ms) >= LONG_PRESS_MS) {
-            dec->long_fired = true;
-            push(dec, ENC_LONG, 0);
-        }
-
-        if (down != dec->sw_down && (uint32_t)(now_ms - dec->last_sw_ms) >= SWITCH_DEBOUNCE_MS) {
+        if (down == dec->sw_down) {
+            dec->sw_pending = false;
+        } else if (!dec->sw_pending || dec->sw_pending_down != down) {
+            dec->sw_pending = true;
+            dec->sw_pending_down = down;
+            dec->sw_pending_ms = now_ms;
+        } else if ((uint32_t)(now_ms - dec->sw_pending_ms) >= SWITCH_DEBOUNCE_MS) {
             dec->sw_down = down;
-            dec->last_sw_ms = now_ms;
+            dec->sw_pending = false;
             if (down) {
                 dec->press_armed = true;
                 dec->long_fired = false;
@@ -55,6 +54,13 @@ bool encoder_decode_step(encoder_decode_t *dec, uint32_t now_ms, uint8_t a, uint
                 }
                 dec->press_armed = false;
             }
+        }
+
+        /* A hold that reached the threshold fires before a later release is accepted. */
+        if (dec->press_armed && dec->sw_down && !dec->long_fired &&
+            (uint32_t)(now_ms - dec->press_ms) >= LONG_PRESS_MS) {
+            dec->long_fired = true;
+            push(dec, ENC_LONG, 0);
         }
 
         if (ab != dec->ab && (uint32_t)(now_ms - dec->last_quad_ms) >= QUAD_DEBOUNCE_MS) {

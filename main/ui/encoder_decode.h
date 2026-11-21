@@ -21,8 +21,10 @@ typedef struct {
     int8_t accum;          /* quadrature transitions since the last detent */
     uint32_t last_quad_ms; /* time of the last accepted quadrature edge */
     bool sw_down;          /* debounced switch state, true when pressed (low) */
-    uint32_t last_sw_ms;   /* time of the last accepted switch edge */
-    bool press_armed;      /* a press edge was seen and its release is pending */
+    bool sw_pending;       /* raw level differs from the debounced state */
+    bool sw_pending_down;
+    uint32_t sw_pending_ms; /* when the pending level was first seen */
+    bool press_armed;      /* a debounced press is down and its release is pending */
     bool long_fired;
     uint32_t press_ms;
     enc_event_t queue[ENC_QUEUE_LEN];
@@ -33,7 +35,9 @@ typedef struct {
 void encoder_decode_init(encoder_decode_t *dec);
 
 /* Feed one sample of the encoder pins. The first sample is the baseline and
- * emits nothing. Returns true and fills *out when an event is available. At
+ * emits nothing. A switch level is accepted only after it has differed from the
+ * debounced state continuously for 20 ms. Returns true and fills *out when an
+ * event is available. At
  * most one event is returned per call; when a sample yields more than one,
  * the rest are returned by the following calls. Pass the same or a later
  * now_ms on those calls. now_ms wraps at 2^32. */
