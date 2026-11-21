@@ -6,7 +6,7 @@ The firmware runs an automatic, weight-triggered batch on an ESP32-S3. The opera
 
 ## Locked decisions
 
-- The deliverable is firmware that builds and flashes with ESP-IDF v6.1.1. The scale register map, baud settings, and panel controller live in a compiled device profile.
+- The deliverable is firmware that builds and flashes with ESP-IDF 6.1 (`>=6.1.0,<6.2.0`). This tree was verified on 6.1.0. The scale register map, baud settings, and panel controller live in a compiled device profile.
 - An I/O transaction failure commands shredder off, grinder off, and door close, then latches `MACHINE_FAULT` until the operator acknowledges. Acknowledgement is accepted only after a later I/O transaction has succeeded.
 - Scale loss before a batch is latched keeps the machine waiting. Scale loss after the latch finishes the timing sequence, raises a sticky scale warning, and blocks the next batch until the scale is healthy and the weight is below the reset threshold and stable.
 - Software stop is a confirmed encoder action. It commands all three outputs off, cancels the batch, returns to `MACHINE_IDLE`, and requires the normal re-arm. Settings and manual mode open only from `MACHINE_IDLE`.
@@ -16,7 +16,7 @@ The firmware runs an automatic, weight-triggered batch on an ESP32-S3. The opera
 
 ## Global constraints
 
-- Framework: native ESP-IDF v6.1.1. Target `esp32s3`. Language C. Build system CMake.
+- Framework: native ESP-IDF 6.1. Target `esp32s3`. Language C. Build system CMake. Verified on 6.1.0.
 - No Arduino framework and no Arduino libraries.
 - RTOS: FreeRTOS. Tick rate 1000 Hz.
 - Controller module: ESP32-S3 N16R8 (16 MB flash, octal PSRAM).
@@ -60,7 +60,7 @@ All firmware timestamps are `(uint32_t)(esp_timer_get_time() / 1000)`.
 | Output rewrite | 500 ms, and also on every image change |
 | Scale stale limit | 500 ms |
 | Modbus response timeout | 100 ms |
-| Button debounce | 20 ms |
+| Button debounce | 20 ms of a stable new level |
 | Quadrature debounce | 2 ms |
 | Long press | 800 ms |
 | Quadrature transitions per detent | 4 |
@@ -175,7 +175,7 @@ While the state is `MACHINE_WEIGHT_VALIDATION`, `MACHINE_START_GRINDER`, `MACHIN
 
 ## Operator interface
 
-Encoder levels are sampled from a GPIO interrupt and also polled every 10 ms so a held button reaches 800 ms. The decoder emits one event per call. Button events and completed detents that happen on the same sample are both delivered, one per call.
+Encoder levels are sampled from a GPIO interrupt and also polled every 10 ms so a held button reaches 800 ms. The decoder emits one event per call. Button events and completed detents that happen on the same sample are both delivered, one per call. A switch level is accepted only after it has differed from the debounced level continuously for 20 ms, so a noise spike does not become a press. The long-press timer starts when that stable press is accepted. The switch is active low. Quadrature edges closer than 2 ms are ignored.
 
 | Gesture | Result |
 |---|---|
@@ -273,8 +273,8 @@ The bus holds mutex-protected copies of the machine status, scale snapshot, I/O 
 1. `nvs_flash_init`.
 2. Load settings. On failure, keep defaults and set `settings_reset`.
 3. `status_bus_init` and publish settings.
-4. Initialize SPI panel, backlight on, LVGL, and the encoder GPIO ISR.
-5. Install the UART and set RS485 half duplex.
+4. Install the UART and set RS485 half duplex.
+5. Initialize the SPI panel, backlight, LVGL, and the encoder GPIO ISR.
 6. Create the HMI task, then the Modbus task, then the control task.
 
 No Wi-Fi and no Bluetooth are started.
