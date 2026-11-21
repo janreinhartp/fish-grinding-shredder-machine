@@ -198,6 +198,10 @@ void ui_on_encoder(ui_model_t *ui, const ui_view_t *view, const enc_event_t *eve
     if (view->state == MACHINE_FAULT) {
         if (event->type == ENC_SHORT) {
             command->type = CMD_ACK_FAULT;
+            ui->manual_shredder = false;
+            ui->manual_grinder = false;
+            ui->manual_door = false;
+            go(ui, UI_SCREEN_MAIN, 0);
         }
         return;
     }

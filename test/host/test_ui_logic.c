@@ -194,7 +194,35 @@ static void test_fault(void) {
     EXPECT_EQ_INT(ui.screen, UI_SCREEN_MENU);
     cmd = send(&ui, MACHINE_FAULT, SHORT_PRESS);
     EXPECT_EQ_INT(cmd.type, CMD_ACK_FAULT);
-    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MENU);
+    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MAIN);
+}
+
+static void test_fault_ack_resets_manual_screen(void) {
+    ui_model_t ui;
+    new_ui(&ui);
+    send(&ui, MACHINE_IDLE, LONG_PRESS);
+    send(&ui, MACHINE_IDLE, rotate(1)); /* Manual */
+    send(&ui, MACHINE_IDLE, SHORT_PRESS);
+    operator_event_t cmd = send(&ui, MACHINE_IDLE, SHORT_PRESS); /* Enable */
+    EXPECT_EQ_INT(cmd.type, CMD_ENTER_MANUAL);
+    cmd = send(&ui, MACHINE_MANUAL, SHORT_PRESS); /* Shredder on */
+    EXPECT_EQ_INT(cmd.type, CMD_SET_SHREDDER);
+    EXPECT_EQ_INT(ui.manual_shredder, 1);
+
+    /* Rotate and long press in fault do nothing and keep the screen. */
+    cmd = send(&ui, MACHINE_FAULT, rotate(1));
+    EXPECT_EQ_INT(cmd.type, CMD_NONE);
+    cmd = send(&ui, MACHINE_FAULT, LONG_PRESS);
+    EXPECT_EQ_INT(cmd.type, CMD_NONE);
+    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MANUAL);
+
+    cmd = send(&ui, MACHINE_FAULT, SHORT_PRESS);
+    EXPECT_EQ_INT(cmd.type, CMD_ACK_FAULT);
+    EXPECT_EQ_INT(ui.screen, UI_SCREEN_MAIN);
+    EXPECT_EQ_INT(ui.editing, 0);
+    EXPECT_EQ_INT(ui.manual_shredder, 0);
+    EXPECT_EQ_INT(ui.manual_grinder, 0);
+    EXPECT_EQ_INT(ui.manual_door, 0);
 }
 
 static void test_other_screens_ignore_long_press(void) {
@@ -331,6 +359,7 @@ int main(void) {
     test_stop_confirm();
     test_manual_mode();
     test_fault();
+    test_fault_ack_resets_manual_screen();
     test_other_screens_ignore_long_press();
     test_diagnostics();
     test_menu_wraps();
