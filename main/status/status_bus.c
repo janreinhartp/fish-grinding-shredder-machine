@@ -14,7 +14,7 @@ static io_snapshot_t s_io;
 static scale_snapshot_t s_scale;
 static machine_settings_t s_settings;
 static bool s_start_allowed;
-static bool s_settings_save_pending;
+static bool s_settings_save_failed;
 static bool s_settings_reset;
 
 bool status_bus_init(void) {
@@ -33,7 +33,7 @@ bool status_bus_init(void) {
     s_scale = (scale_snapshot_t){.grams = 0, .last_ok = false, .have_sample = false, .sample_ms = 0};
     s_settings = machine_settings_defaults();
     s_start_allowed = true;
-    s_settings_save_pending = false;
+    s_settings_save_failed = false;
     s_settings_reset = false;
     return true;
 }
@@ -69,8 +69,8 @@ machine_settings_t status_bus_get_settings(void) { BUS_GET(machine_settings_t, s
 void status_bus_set_start_allowed(bool allowed) { BUS_SET(s_start_allowed, &allowed); }
 bool status_bus_get_start_allowed(void) { BUS_GET(bool, s_start_allowed); }
 
-void status_bus_set_settings_save_pending(bool pending) { BUS_SET(s_settings_save_pending, &pending); }
-bool status_bus_get_settings_save_pending(void) { BUS_GET(bool, s_settings_save_pending); }
+void status_bus_set_settings_save_failed(bool failed) { BUS_SET(s_settings_save_failed, &failed); }
+bool status_bus_get_settings_save_failed(void) { BUS_GET(bool, s_settings_save_failed); }
 
 void status_bus_set_settings_reset(bool reset) { BUS_SET(s_settings_reset, &reset); }
 bool status_bus_get_settings_reset(void) { BUS_GET(bool, s_settings_reset); }

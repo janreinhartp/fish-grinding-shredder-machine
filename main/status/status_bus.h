@@ -34,8 +34,8 @@ machine_settings_t status_bus_get_settings(void);
 void status_bus_set_start_allowed(bool allowed);
 bool status_bus_get_start_allowed(void);
 
-void status_bus_set_settings_save_pending(bool pending);
-bool status_bus_get_settings_save_pending(void);
+void status_bus_set_settings_save_failed(bool failed);
+bool status_bus_get_settings_save_failed(void);
 
 void status_bus_set_settings_reset(bool reset);
 bool status_bus_get_settings_reset(void);
