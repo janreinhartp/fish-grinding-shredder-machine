@@ -7,9 +7,16 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(ROOT ${CMAKE_CURRENT_LIST_DIR}/../..)
 add_library(firmware_host STATIC
     ${ROOT}/main/common/crc16.c
+    ${ROOT}/main/machine/machine_settings.c
+    ${ROOT}/main/settings/settings_codec.c
 )
 target_include_directories(firmware_host PUBLIC ${ROOT}/main)
 
-add_executable(test_crc16 test_crc16.c)
-target_link_libraries(test_crc16 PRIVATE firmware_host)
-add_test(NAME test_crc16 COMMAND test_crc16)
+function(add_host_test name)
+    add_executable(${name} ${name}.c)
+    target_link_libraries(${name} PRIVATE firmware_host)
+    add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+add_host_test(test_crc16)
+add_host_test(test_settings)
