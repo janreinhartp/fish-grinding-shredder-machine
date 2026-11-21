@@ -10,6 +10,9 @@ add_library(firmware_host STATIC
     ${ROOT}/main/machine/machine_settings.c
     ${ROOT}/main/machine/machine_core.c
     ${ROOT}/main/settings/settings_codec.c
+    ${ROOT}/main/modbus/modbus_master.c
+    ${ROOT}/main/device/scale_decode.c
+    ${ROOT}/main/device/profile.c
 )
 target_include_directories(firmware_host PUBLIC ${ROOT}/main)
 
@@ -22,3 +25,5 @@ endfunction()
 add_host_test(test_crc16)
 add_host_test(test_settings)
 add_host_test(test_machine_core)
+add_host_test(test_modbus_master)
+add_host_test(test_scale_decode)
