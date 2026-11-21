@@ -1372,3 +1372,435 @@ Add the batch state machine with host-tested arming and fault rules.
 EOF
 )"
 ```
+
+### Task 4: Modbus master, scale decode, and device profile
+
+**Files:**
+- Create: `main/modbus/modbus_master.h`
+- Create: `main/modbus/modbus_master.c`
+- Create: `main/device/scale_decode.h`
+- Create: `main/device/scale_decode.c`
+- Create: `main/device/profile.h`
+- Create: `main/device/profile.c`
+- Create: `test/host/test_modbus_master.c`
+- Create: `test/host/test_scale_decode.c`
+- Modify: `test/host/CMakeLists.txt`
+- Test: `test/host/test_modbus_master.c`, `test/host/test_scale_decode.c`
+
+**Interfaces:**
+- Consumes: `crc16_modbus`
+- Produces:
+  - `modbus_status_t` with the nine codes named in the spec
+  - `modbus_link_t` with `write` returning 0 and `read` returning a byte count, 0, or negative
+  - `modbus_status_t modbus_read_registers(const modbus_link_t *link, uint8_t slave, uint8_t function, uint16_t address, uint16_t count, uint16_t *regs);`
+  - `modbus_status_t modbus_write_coils(const modbus_link_t *link, uint8_t slave, uint16_t address, uint16_t count, uint8_t coil_byte);`
+  - `modbus_status_t modbus_write_single_coil(const modbus_link_t *link, uint8_t slave, uint16_t address, bool on);`
+  - `bool scale_decode(scale_decode_t mode, const uint16_t *regs, size_t count, int32_t *grams);`
+  - `const device_profile_t *device_profile(void);` returning the initial profile from the spec
+
+- [ ] **Step 1: Write the failing tests**
+
+Add these sources to `firmware_host` and register both test executables:
+
+```cmake
+    ${ROOT}/main/modbus/modbus_master.c
+    ${ROOT}/main/device/scale_decode.c
+    ${ROOT}/main/device/profile.c
+```
+
+```cmake
+add_host_test(test_modbus_master)
+add_host_test(test_scale_decode)
+```
+
+Create `test/host/test_modbus_master.c` with a fake transport that records the last TX frame and returns a prepared RX buffer. Cover:
+
+- A read of slave 1, function `0x03`, address 0, count 2 sends `01 03 00 00 00 02` plus the CRC from `crc16_modbus`. The reply `01 03 04 00 00 67 20 D1 DB` returns `MODBUS_OK` and registers `{0x0000, 0x6720}`.
+- The same reply with the last byte flipped returns `MODBUS_ERR_CRC`.
+- An empty read returns `MODBUS_ERR_TIMEOUT`.
+- Reply `01 83 02 C0 F1` returns `MODBUS_ERR_EXCEPTION`.
+- `modbus_write_coils(link, 2, 0, 3, 0x07)` sends `02 0F 00 00 00 03 01 07` plus CRC. Reply `02 0F 00 00 00 03 15 F9` returns `MODBUS_OK`.
+- `modbus_write_single_coil(link, 2, 0, true)` sends `02 05 00 00 FF 00` plus CRC. The matching 8-byte echo returns `MODBUS_OK`.
+- `count == 0` returns `MODBUS_ERR_ARGUMENT`.
+- A write callback that returns -1 produces `MODBUS_ERR_TRANSPORT`.
+
+Create `test/host/test_scale_decode.c`:
+
+- `SCALE_DECODE_S32_BE_GRAMS` of `{0x0000, 0x6720}` is 26400.
+- `SCALE_DECODE_S32_LE_GRAMS` of `{0x6720, 0x0000}` is 26400.
+- `SCALE_DECODE_S32_BE_GRAMS` of `{0xFFFF, 0xFFFF}` is -1.
+- `SCALE_DECODE_S16_GRAMS` of `{0xFF9C}` with count 1 is -100.
+- `SCALE_DECODE_S16_GRAMS` with count 2 returns false.
+- `device_profile()` matches the spec: baud 9600, TX 17, RX 18, DE 16, `use_de` true, parity none, UART port 1, scale slave 1 function `0x03` register 0 count 2 decode `SCALE_DECODE_S32_BE_GRAMS`, I/O slave 2 function `0x0F` coil 0 count 3, panel 320 by 240, SCLK 4, MOSI 5, MISO 6, CS 7, DC 8, RST 9, backlight 10 active high, `swap_xy` true, mirrors false, SPI host value 2, encoder A 11 B 12 switch 13 active low, poll 100, refresh 500, stale 500, timeout 100, control period 10, long press 800, button debounce 20, quadrature debounce 2, steps per detent 4.
+
+Build the expected CRC in the test with `crc16_modbus` for the request frames. Use the hardcoded reply bytes above so a broken CRC check fails.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cmake -S test/host -B build/host`
+
+Expected: failure text contains `modbus_master.c`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+`modbus_read_registers` rejects a null link, a null output, `count == 0`, `count > 8`, and a function other than `0x03` or `0x04` with `MODBUS_ERR_ARGUMENT`. It writes the 8-byte request, CRC low byte first. `write` returning non-zero is `MODBUS_ERR_TRANSPORT`. `read` returning negative is `MODBUS_ERR_TRANSPORT`, 0 is `MODBUS_ERR_TIMEOUT`, and fewer than 5 bytes is `MODBUS_ERR_LENGTH`. CRC covers every byte except the last two. Then check slave, exception bit, function, byte count `count * 2`, and total length `5 + count * 2`. Register words are big-endian.
+
+`modbus_write_coils` sends function `0x0F` with one data byte and expects an 8-byte echo of slave, function, address, and quantity. `modbus_write_single_coil` sends function `0x05` with `0xFF00` for on and `0x0000` for off, and expects the same 8 bytes back. A mismatched echo is `MODBUS_ERR_FUNCTION`.
+
+`scale_decode` implements the three modes from the spec. Any other mode, a null pointer, or the wrong count returns false.
+
+`device_profile()` returns a static `device_profile_t` with the values in the test list. `spi_host == 2` means SPI2; `board.c` maps that to `SPI2_HOST`.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cmake -S test/host -B build/host && cmake --build build/host --config Debug && ctest --test-dir build/host -C Debug --output-on-failure -R "test_modbus_master|test_scale_decode"`
+
+Expected: `100% tests passed`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add main/modbus main/device test/host/test_modbus_master.c test/host/test_scale_decode.c test/host/CMakeLists.txt
+git commit -m "$(cat <<'EOF'
+Add the RTU master and the compiled scale and pin profile.
+
+EOF
+)"
+```
+
+### Task 5: Encoder decoder
+
+**Files:**
+- Create: `main/ui/encoder_decode.h`
+- Create: `main/ui/encoder_decode.c`
+- Create: `test/host/test_encoder_decode.c`
+- Modify: `test/host/CMakeLists.txt`
+- Test: `test/host/test_encoder_decode.c`
+
+**Interfaces:**
+- Consumes: nothing
+- Produces:
+  - `enc_event_t` with `type` of `ENC_ROTATE`, `ENC_SHORT`, or `ENC_LONG`, and `int8_t steps`
+  - `void encoder_decode_init(encoder_decode_t *dec);`
+  - `bool encoder_decode_step(encoder_decode_t *dec, uint32_t now_ms, uint8_t a, uint8_t b, uint8_t sw, enc_event_t *out);`
+  - The first sample is the baseline and emits nothing. One detent is four quadrature transitions. The table for index `(old_ab << 2) | new_ab` is `{0, +1, -1, 0, -1, 0, 0, +1, +1, 0, 0, -1, 0, -1, +1, 0}` where `ab = (a << 1) | b`. Clockwise `00,01,11,10,00` emits one `ENC_ROTATE` with `steps == 1`. The opposite sequence emits `steps == -1`.
+  - Switch low is pressed. A release before 800 ms emits `ENC_SHORT`. Holding to 800 ms emits `ENC_LONG` once and the release emits nothing. Edges closer than 20 ms are ignored. Quadrature edges closer than 2 ms are ignored. At most one event is returned per call; a second event from the same sample is returned on the next call.
+
+- [ ] **Step 1: Write the failing test**
+
+Add `encoder_decode.c` to the host library and `add_host_test(test_encoder_decode)`.
+
+The test feeds the clockwise and counterclockwise sequences at 5 ms spacing, the 800 ms long press, a 100 ms short press, and a release 10 ms after the press that must not emit until 20 ms have passed. Call `encoder_decode_step` in a loop when a sample can produce two events.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cmake -S test/host -B build/host`
+
+Expected: failure text contains `encoder_decode.c`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+Implement the header and `.c` file to the interface above. Quadrature state and the pending event live in `encoder_decode_t`. Do not include ESP-IDF headers.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cmake -S test/host -B build/host && cmake --build build/host --config Debug && ctest --test-dir build/host -C Debug --output-on-failure -R test_encoder_decode`
+
+Expected: `100% tests passed`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add main/ui/encoder_decode.h main/ui/encoder_decode.c test/host/test_encoder_decode.c test/host/CMakeLists.txt
+git commit -m "$(cat <<'EOF'
+Add detent and press decoding for the panel encoder.
+
+EOF
+)"
+```
+
+### Task 6: UI navigation logic
+
+**Files:**
+- Create: `main/ui/ui_logic.h`
+- Create: `main/ui/ui_logic.c`
+- Create: `test/host/test_ui_logic.c`
+- Modify: `test/host/CMakeLists.txt`
+- Test: `test/host/test_ui_logic.c`
+
+**Interfaces:**
+- Consumes: `machine_settings_valid`, `machine_settings_defaults`, `enc_event_t`
+- Produces:
+  - Screens `UI_SCREEN_MAIN`, `UI_SCREEN_MENU`, `UI_SCREEN_STOP_CONFIRM`, `UI_SCREEN_SETTINGS`, `UI_SCREEN_MANUAL_CONFIRM`, `UI_SCREEN_MANUAL`, `UI_SCREEN_DIAGNOSTICS`
+  - `void ui_init(ui_model_t *ui, const machine_settings_t *settings);`
+  - `void ui_on_encoder(ui_model_t *ui, const ui_view_t *view, const enc_event_t *event, operator_event_t *command);`
+  - `bool ui_start_allowed(const ui_model_t *ui);` true only on `UI_SCREEN_MAIN`
+  - `void ui_on_settings_saved(ui_model_t *ui, bool ok);`
+  - `void ui_format_weight(int32_t grams, char *out, size_t out_len);` — `25000` formats as `25.00 kg`, `-150` as `-0.15 kg`
+  - `void ui_format_time(uint32_t ms, char *out, size_t out_len);` — `2000` formats as `2.0 s`
+  - `const char *ui_setting_label(int index);` for the twelve names in the spec, then `Save` and `Back`
+  - Setting ranges and steps from the spec table. An edit that leaves the range or fails `machine_settings_valid` is discarded.
+
+`ui_view_t` carries `machine_state_t state` and `machine_settings_t settings`. `ui_on_encoder` writes exactly one command; unused results are `CMD_NONE`.
+
+Navigation rules are the operator-interface section of the spec. A fault-state short press sends `CMD_ACK_FAULT` from any screen. Save sets `ui->save_requested` and stays on settings until `ui_on_settings_saved`. Success copies the edited settings into the saved copy and returns to the menu. Failure stays on settings. Back restores the copy captured when settings was opened.
+
+- [ ] **Step 1: Write the failing test**
+
+Add `ui_logic.c` to the host library and `add_host_test(test_ui_logic)`.
+
+Tests:
+
+- Long press on main while `MACHINE_IDLE` opens the menu and emits `CMD_NONE`. `ui_start_allowed` is false on the menu.
+- Short press on menu row 0 opens settings. Rotate onto minimum batch, edit it upward by one step, short press to leave edit. The in-screen value is 1100 and the saved copy is still 1000.
+- Short press on Back restores 1000 and returns to the menu.
+- Raising reset threshold to the target is ignored.
+- Long press on main while `MACHINE_DISCHARGING` opens stop confirm. Short press on Stop emits `CMD_STOP_CONFIRMED` and returns to main.
+- Short press on Cancel emits `CMD_NONE` and returns to main.
+- Menu row Manual opens confirm. Enable emits `CMD_ENTER_MANUAL`. A short press on the shredder row emits `CMD_SET_SHREDDER` with `level == true`. Back emits `CMD_EXIT_MANUAL`.
+- While `view.state == MACHINE_FAULT`, a short press emits `CMD_ACK_FAULT` and a long press does not open the menu.
+- `ui_format_weight(25000)` is `25.00 kg`. `ui_format_time(2000)` is `2.0 s`.
+- Save sets `save_requested`. `ui_on_settings_saved(ui, true)` clears it and lands on the menu. `ui_on_settings_saved(ui, false)` stays on settings.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cmake -S test/host -B build/host`
+
+Expected: failure text contains `ui_logic.c`.
+
+- [ ] **Step 3: Write the minimal implementation**
+
+Implement `ui_logic.h` and `ui_logic.c` with no ESP-IDF includes. Menu rows are Settings, Manual, Diagnostics. Stop rows are Stop, Cancel. Manual confirm rows are Enable, Cancel. Manual rows are Shredder, Grinder, Door, Back. Diagnostics short press returns to the menu. Rotate wraps the current list, including a negative step.
+
+- [ ] **Step 4: Run the test to verify it passes**
+
+Run: `cmake -S test/host -B build/host && cmake --build build/host --config Debug && ctest --test-dir build/host -C Debug --output-on-failure`
+
+Expected: `100% tests passed` for every host test registered so far.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add main/ui/ui_logic.h main/ui/ui_logic.c test/host/test_ui_logic.c test/host/CMakeLists.txt
+git commit -m "$(cat <<'EOF'
+Add encoder navigation for stop, settings, and manual mode.
+
+EOF
+)"
+```
+
+### Task 7: Flashable controller without the panel
+
+**Files:**
+- Create: `CMakeLists.txt`
+- Create: `sdkconfig.defaults`
+- Create: `partitions.csv`
+- Create: `.gitignore`
+- Create: `main/CMakeLists.txt`
+- Create: `main/idf_component.yml`
+- Create: `main/main.c`
+- Create: `main/status/status_bus.h`
+- Create: `main/status/status_bus.c`
+- Create: `main/settings/settings_store.h`
+- Create: `main/settings/settings_store.c`
+- Create: `main/device/board.h`
+- Create: `main/device/board.c`
+- Create: `main/machine/control_task.c`
+- Create: `main/modbus/modbus_task.c`
+- Test: `idf.py build` and the existing host suite
+
+**Interfaces:**
+- Consumes: the host-tested core, codec, master, profile, and scale decode
+- Produces: `status_bus_*` accessors, `settings_store_load`, `settings_store_save`, `board_modbus_init`, `board_modbus_link`, `control_task`, and `modbus_task`. Tasks are created with the priorities, CPUs, and stack sizes in the spec. This task does not create the HMI task; `start_allowed` stays at its initial true value so the sequence can run during bus bring-up.
+
+- [ ] **Step 1: Add the project files**
+
+Root `CMakeLists.txt` is build system v1:
+
+```cmake
+cmake_minimum_required(VERSION 3.22)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(fish_shredder)
+```
+
+`sdkconfig.defaults`:
+
+```text
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+```
+
+`partitions.csv`:
+
+```text
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 0x300000,
+```
+
+`.gitignore`:
+
+```text
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+```
+
+`main/idf_component.yml`:
+
+```yaml
+dependencies:
+  idf:
+    version: ">=6.1.0,<6.2.0"
+```
+
+LVGL is added in Task 8. Do not add it here.
+
+`settings_store_load` opens namespace `machine`, reads blob `cfg`, and unpacks it. Any failure returns false and writes `machine_settings_defaults()` to the out pointer. `settings_store_save` packs 54 bytes, `nvs_set_blob`, and `nvs_commit`.
+
+`status_bus_init` creates a mutex and an 8-deep queue of `operator_event_t`. Initial machine status is idle with outputs off. Initial I/O snapshot has `link_ok` true and `attempted` false. Initial scale snapshot has `last_ok` false and `have_sample` false. Settings are the defaults. `start_allowed` is true. Both settings flags are false. Get and set copy under the mutex. `status_bus_send_command` and `status_bus_take_command` are non-blocking.
+
+`board_modbus_init` installs UART port 1 at the profile baud, 8 data bits, the profile parity, and one stop bit. TX, RX, and DE pins come from the profile. `use_de` true selects `UART_MODE_RS485_HALF_DUPLEX` with DE on the UART RTS pin. `use_de` false selects `UART_MODE_UART` and no RTS pin. `board_write` writes the bytes, waits for TX done, flushes RX, and returns 0. `board_read` waits up to the requested timeout for the first byte, then reads until a 5 ms gap or 64 bytes. It returns the byte count, 0 on a first-byte timeout, and -1 on a driver error.
+
+`modbus_task` polls the scale every `scale_poll_ms`. On `MODBUS_OK` and a successful `scale_decode`, it stores grams, sets `last_ok` and `have_sample`, and sets `sample_ms`. On failure it sets `last_ok` false and leaves the previous grams. It writes coils when the output image changes and every `output_refresh_ms`. Coil bit 0 is the shredder, bit 1 the grinder, bit 2 the door. Function `0x0F` uses `modbus_write_coils`. Function `0x05` writes the three coils with `modbus_write_single_coil` and reports the first failure. `link_ok` follows that result and `attempted` becomes true. Failures log with `ESP_LOGW` on tag `modbus`.
+
+`control_task` wakes every `control_period_ms`. It publishes settings into the core, builds `scale_sample_t.valid` from `last_ok && grams >= 0 && age <= scale_stale_ms`, takes one command, reads `start_allowed` and `io.link_ok`, calls `machine_core_step`, logs state changes with `ESP_LOGI` on tag `control` and `machine_state_name`, and publishes the status. The clock is `(uint32_t)(esp_timer_get_time() / 1000)`.
+
+`app_main` calls `nvs_flash_init`, erases and retries when the error is `ESP_ERR_NVS_NO_FREE_PAGES` or `ESP_ERR_NVS_NEW_VERSION_FOUND`, loads settings, initializes the status bus, publishes settings and `settings_reset`, initializes the UART, then creates `modbus_task` at priority 9 on CPU 1 and `control_task` at priority 10 on CPU 1. Both stacks are 4096.
+
+`main/CMakeLists.txt` registers every `.c` file created through this task. `REQUIRES` includes `esp_driver_uart`, `nvs_flash`, and `esp_timer`.
+
+- [ ] **Step 2: Build the firmware and rerun the host tests**
+
+From an ESP-IDF v6.1.1 shell at the repo root:
+
+```powershell
+idf.py set-target esp32s3
+idf.py build
+cmake -S test/host -B build/host
+cmake --build build/host --config Debug
+ctest --test-dir build/host -C Debug --output-on-failure
+```
+
+Expected: the firmware log contains `Project build complete`. Host tests print `100% tests passed`.
+
+`idf.py set-target esp32s3` rewrites `sdkconfig`. Keep `sdkconfig.defaults` as the committed source of the chip options. Do not commit `sdkconfig`.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add CMakeLists.txt sdkconfig.defaults partitions.csv .gitignore main
+git commit -m "$(cat <<'EOF'
+Boot a Modbus controller that runs the batch sequence without a panel.
+
+EOF
+)"
+```
+
+### Task 8: Panel, encoder, and HMI task
+
+**Files:**
+- Create: `main/hmi/display.h`
+- Create: `main/hmi/display.c`
+- Create: `main/hmi/encoder_hw.h`
+- Create: `main/hmi/encoder_hw.c`
+- Create: `main/hmi/hmi_task.c`
+- Modify: `main/main.c`
+- Modify: `main/CMakeLists.txt`
+- Modify: `main/idf_component.yml`
+- Modify: `sdkconfig.defaults`
+- Test: `idf.py build`
+
+**Interfaces:**
+- Consumes: `ui_logic`, `encoder_decode`, `device_profile`, `status_bus`, `settings_store`
+- Produces: `display_init`, `encoder_hw_init`, `encoder_hw_take`, `encoder_hw_latest`, and `hmi_task`. After this task, `app_main` creates the HMI task first, then Modbus, then control, which is the spec boot order.
+
+- [ ] **Step 1: Add the panel and the HMI task**
+
+Append to `main/idf_component.yml`:
+
+```yaml
+  lvgl/lvgl: "9.5.0"
+  espressif/esp_lcd_ili9341: "2.1.0"
+```
+
+Append to `sdkconfig.defaults`:
+
+```text
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_COLOR_DEPTH_16=y
+```
+
+`display_init` initializes SPI2 from `panel.spi_host == 2`, adds the ILI9341 panel on the profile pins at 20 MHz, SPI mode 0, 16 bits per pixel, and `LCD_RGB_ELEMENT_ORDER_BGR`. It applies `swap_xy`, `mirror_x`, and `mirror_y`, turns the display on, and drives the backlight from `bl_active_high`. It calls `lv_init`, creates a 320 by 240 display, and sets a partial RGB565 flush. The flush callback calls `esp_lcd_panel_draw_bitmap` and does not call `lv_display_flush_ready`. The panel I/O `on_color_trans_done` callback calls `lv_display_flush_ready`. Each draw buffer is `h_res * 24` RGB565 pixels from `heap_caps_malloc` with `MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL`.
+
+`encoder_hw_init` configures the three encoder GPIOs as inputs with pull-ups and `GPIO_INTR_ANYEDGE`. The ISR reads A, B, and the switch, stores them as the latest sample under a port mux, and posts that sample to a 32-deep queue. `encoder_hw_take` is non-blocking. `encoder_hw_latest` returns the mux-protected sample.
+
+`hmi_task` initializes `ui_model_t` from the published settings and `encoder_decode_t`. Every 10 ms it drains encoder samples through `encoder_decode_step`, then calls the decoder once more with the latest levels and the current millisecond time so a held button can reach 800 ms. Each decoded event calls `ui_on_encoder` with a view built from the machine status and the published settings. A command other than `CMD_NONE` is queued. When `save_requested` is set, `settings_store_save` runs. Success publishes the settings and clears both settings flags. Failure sets `settings_save_failed` and logs `ESP_LOGE` on tag `hmi`. Then `ui_on_settings_saved` runs. The task writes `ui_start_allowed` into the status bus, updates the labels below, and calls `lv_timer_handler`.
+
+Labels, in Montserrat 20 for the weight and Montserrat 14 for the rest:
+
+- Weight from the scale snapshot, or `--` when `have_sample` is false
+- Target from the published settings
+- `Stable` or `Unstable` from machine status
+- State name
+- Shredder and grinder `On` or `Off`
+- `Door command` `Open` or `Close`
+- Scale link text and I/O link text from the spec tables
+- Banner `Scale lost during batch`, `Settings reset to defaults`, and `Settings were not saved` when those flags are set
+
+While the machine state is `MACHINE_FAULT`, show `I/O link lost` and hide the other screens. Otherwise show the container for `ui->screen`. Menu, settings, stop confirm, manual confirm, manual, and diagnostics render their current row and mark the selected row. Settings shows `ui_setting_label` and the formatted value. Diagnostics adds baud, both slave IDs, the scale register, the decode name (`S32_BE_GRAMS`, `S32_LE_GRAMS`, or `S16_GRAMS`), and the last Modbus status codes.
+
+Add the three new `.c` files to `main/CMakeLists.txt`. Add `esp_lcd`, `esp_driver_gpio`, `esp_driver_spi`, `esp_lcd_ili9341`, and `lvgl` to `REQUIRES`.
+
+Replace the task-creation section of `app_main` so the order is `hmi_task` (priority 5, CPU 0, stack 8192), `modbus_task`, `control_task`. Call `display_init` and `encoder_hw_init` before the tasks start.
+
+- [ ] **Step 2: Build**
+
+```powershell
+idf.py build
+cmake --build build/host --config Debug
+ctest --test-dir build/host -C Debug --output-on-failure
+```
+
+Expected: `Project build complete` and `100% tests passed`. If a LVGL Kconfig symbol name differs in 9.5.0, change `sdkconfig.defaults` until `lv_font_montserrat_14` and `lv_font_montserrat_20` link. Do not switch the project to build system v2 to get past a PSRAM error.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add main sdkconfig.defaults
+git commit -m "$(cat <<'EOF'
+Show machine status on the panel and accept encoder commands.
+
+EOF
+)"
+```
+
+Commit `dependencies.lock` in this same commit if `idf.py build` created it.
+
+## Plan self-review
+
+Spec coverage is mapped as follows.
+
+| Spec section | Task |
+|---|---|
+| CRC, settings record, defaults, ranges | Tasks 1, 2, 6 |
+| Stability, arming, one-shot batch, cycle timers | Task 3 |
+| State list, stop, fault, manual, scale-loss rules | Task 3 |
+| Modbus status codes, frames, scale decode, initial profile | Task 4 |
+| Encoder gestures | Tasks 5 and 8 |
+| Screens, banners, formats, `start_allowed` | Tasks 6 and 8 |
+| 10 ms control, 100 ms poll, 500 ms rewrite, stale sample | Task 7 |
+| NVS load and save, boot order, three tasks, LVGL flush | Tasks 7 and 8 |
+| Build system v1 and octal PSRAM | Task 7 |
+
+Host tests do not flash the board. Live scale, contactor, and actuator checks stay in the hardware commissioning stages.
