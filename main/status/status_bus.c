@@ -29,8 +29,13 @@ bool status_bus_init(void) {
         .fault = FAULT_NONE,
         .outputs = {.shredder = false, .grinder = false, .door_open = false},
     };
-    s_io = (io_snapshot_t){.link_ok = true, .attempted = false};
-    s_scale = (scale_snapshot_t){.grams = 0, .last_ok = false, .have_sample = false, .sample_ms = 0};
+    s_io = (io_snapshot_t){.link_ok = true, .attempted = false, .status = MODBUS_OK};
+    s_scale = (scale_snapshot_t){.grams = 0,
+                                 .last_ok = false,
+                                 .have_sample = false,
+                                 .sample_ms = 0,
+                                 .status = MODBUS_OK,
+                                 .status_known = false};
     s_settings = machine_settings_defaults();
     s_start_allowed = true;
     s_settings_save_failed = false;

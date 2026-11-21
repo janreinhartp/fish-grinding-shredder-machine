@@ -48,6 +48,9 @@ static void poll_scale(const modbus_link_t *link, const profile_scale_t *cfg) {
         status = modbus_read_registers(link, cfg->slave, cfg->function, cfg->reg, cfg->count, regs);
     }
 
+    snapshot.status = status;
+    snapshot.status_known = true;
+
     if (status == MODBUS_OK && scale_decode(cfg->decode, regs, cfg->count, &grams)) {
         snapshot.grams = grams;
         snapshot.last_ok = true;
@@ -97,7 +100,7 @@ void modbus_task(void *arg) {
         bool refresh_due = (now - last_write_ms) >= profile->timing.refresh_ms;
         if (!image_known || wanted != last_byte || refresh_due) {
             modbus_status_t status = write_outputs(link, &profile->io, wanted);
-            io_snapshot_t io = {.link_ok = (status == MODBUS_OK), .attempted = true};
+            io_snapshot_t io = {.link_ok = (status == MODBUS_OK), .attempted = true, .status = status};
             status_bus_set_io(&io);
             if (status == MODBUS_OK) {
                 image_known = true;

@@ -3,10 +3,12 @@
 #include <stdint.h>
 
 #include "machine/machine.h"
+#include "modbus/modbus_master.h"
 
 typedef struct {
     bool link_ok;
     bool attempted;
+    modbus_status_t status; /* last coil-write result; meaningful once attempted */
 } io_snapshot_t;
 
 typedef struct {
@@ -14,6 +16,8 @@ typedef struct {
     bool last_ok;
     bool have_sample;
     uint32_t sample_ms;
+    modbus_status_t status; /* last modbus_read_registers result; meaningful once status_known */
+    bool status_known;      /* false until the first scale transaction finishes */
 } scale_snapshot_t;
 
 /* Creates the mutex and the 8-deep operator event queue. Returns false on failure. */

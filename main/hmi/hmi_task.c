@@ -175,6 +175,30 @@ static const char *decode_name(scale_decode_t decode) {
     return "?";
 }
 
+static const char *modbus_status_name(modbus_status_t status) {
+    switch (status) {
+    case MODBUS_OK:
+        return "OK";
+    case MODBUS_ERR_TIMEOUT:
+        return "TIMEOUT";
+    case MODBUS_ERR_CRC:
+        return "CRC";
+    case MODBUS_ERR_SLAVE:
+        return "SLAVE";
+    case MODBUS_ERR_FUNCTION:
+        return "FUNCTION";
+    case MODBUS_ERR_EXCEPTION:
+        return "EXCEPTION";
+    case MODBUS_ERR_TRANSPORT:
+        return "TRANSPORT";
+    case MODBUS_ERR_LENGTH:
+        return "LENGTH";
+    case MODBUS_ERR_ARGUMENT:
+        return "ARGUMENT";
+    }
+    return "?";
+}
+
 static const char *scale_link_text(const scale_snapshot_t *scale, uint32_t now) {
     if (!scale->have_sample) {
         return "Scale --";
@@ -371,11 +395,10 @@ static void render_diagnostics(const machine_status_t *machine, const scale_snap
     set_text(s_diagnostics.rows[6], text);
     snprintf(text, sizeof(text), "Decode %s", decode_name(p->scale.decode));
     set_text(s_diagnostics.rows[7], text);
-    /* The bus carries pass or fail per transaction, not the numeric status code. */
     snprintf(text, sizeof(text), "Last Modbus scale %s",
-             scale->last_ok ? "OK" : (scale->have_sample ? "FAIL" : "--"));
+             scale->status_known ? modbus_status_name(scale->status) : "--");
     set_text(s_diagnostics.rows[8], text);
-    snprintf(text, sizeof(text), "Last Modbus I/O %s", !io->attempted ? "--" : (io->link_ok ? "OK" : "FAIL"));
+    snprintf(text, sizeof(text), "Last Modbus I/O %s", io->attempted ? modbus_status_name(io->status) : "--");
     set_text(s_diagnostics.rows[9], text);
 }
 
