@@ -10,7 +10,7 @@ The firmware runs an automatic, weight-triggered batch on an ESP32-S3. The opera
 - An I/O transaction failure commands shredder off, grinder off, and door close, then latches `MACHINE_FAULT` until the operator acknowledges. Acknowledgement is accepted only after a later I/O transaction has succeeded.
 - Scale loss before a batch is latched keeps the machine waiting. Scale loss after the latch finishes the timing sequence, raises a sticky scale warning, and blocks the next batch until the scale is healthy and the weight is below the reset threshold and stable.
 - Software stop is a confirmed encoder action. It commands all three outputs off, cancels the batch, returns to `MACHINE_IDLE`, and requires the normal re-arm. Settings and manual mode open only from `MACHINE_IDLE`.
-- The device profile is edited in source (`menuconfig` is not used for slave IDs or register addresses) and the project is rebuilt. The TFT edits weights and timers only.
+- Chip options (flash, PSRAM, tick rate) live in `sdkconfig.defaults`. Slave IDs, baud, parity, pins, and the scale map live in `main/device/profile.c`. Changing either one requires a rebuild and flash. The TFT edits weights and timers only.
 - Stability is the peak-to-peak spread over the stability window. The spread must be within the tolerance and the latest sample must still be at or above the target. If the spread exceeds the tolerance, the window starts over at the current sample.
 - The sequence, stability window, re-arm rule, and output requests live in plain C with an injected clock. A small Modbus RTU master owns the UART. Three FreeRTOS tasks exist: control, Modbus, and HMI.
 
@@ -247,7 +247,7 @@ The initial compiled profile is the one the firmware runs until a commissioner e
 
 Supported write functions are `0x0F` (one multiple-coil request) and `0x05` (one request per coil). The initial profile uses `0x0F`.
 
-The master accepts function `0x03` and `0x04` for the scale. A reply with the high function bit set is `MODBUS_ERR_EXCEPTION`. A wrong slave, wrong function, wrong byte count, CRC mismatch, short read, or transport failure returns a distinct status and does not update the gram value.
+The master accepts function `0x03` and `0x04` for the scale. Status codes are `MODBUS_OK`, `MODBUS_ERR_TIMEOUT` (no bytes before the deadline), `MODBUS_ERR_CRC`, `MODBUS_ERR_SLAVE`, `MODBUS_ERR_FUNCTION`, `MODBUS_ERR_EXCEPTION` (function code has bit 7 set), `MODBUS_ERR_TRANSPORT` (write failed or read returned negative), `MODBUS_ERR_LENGTH` (frame shorter than 5 bytes or byte count does not match), and `MODBUS_ERR_ARGUMENT` (missing link callbacks, count 0, or count greater than 8). A failed scale transaction does not update the gram value.
 
 ## Modbus master
 
@@ -256,13 +256,13 @@ The master is given a transport:
 ```c
 typedef struct {
     int (*write)(void *ctx, const uint8_t *data, size_t len);
-    int (*read)(void *ctx, uint8_t *data, size_t len, uint32_t timeout_ms);
+    int (*read)(void *ctx, uint8_t *data, size_t max_len, uint32_t timeout_ms);
     void *ctx;
     uint32_t timeout_ms;
 } modbus_link_t;
 ```
 
-`write` and `read` return 0 on success. `read` fills exactly `len` bytes. The board transport waits for UART TX done and flushes the RX buffer before returning from `write`, so the master reads only the reply. CRC-16/MODBUS is appended low byte first. Known vector: the bytes `123456789` produce `0x4B37`.
+`write` returns 0 on success. `read` returns the number of bytes copied, 0 on timeout, and a negative value on a transport error. The master reads into a 64-byte buffer and parses the actual frame length. The board transport waits for UART TX done and flushes the RX buffer before returning from `write`, so the master reads only the reply. The board reader waits up to the response timeout for the first byte, then keeps reading until a 5 ms gap or the buffer is full. CRC-16/MODBUS is appended low byte first. Known vector: the bytes `123456789` produce `0x4B37`.
 
 ## Status bus
 
